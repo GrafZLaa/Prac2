@@ -19,6 +19,7 @@ def validate_package_name(name: str) -> str:
             raise ValueError("Имя пакета не должно содержать пробелов или путей.")
     return name
 
+
 def validate_repo_url_or_path(repo: str) -> str:
     if not repo:
         raise ValueError("URL репозитория или путь к файлу не может быть пустым.")

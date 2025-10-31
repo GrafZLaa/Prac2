@@ -4,11 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9c0a07e2-79ae-4272-867f-d2b399257698" name="Changes" comment="1 Этап">
-      <change beforePath="$PROJECT_DIR$/.idea/Prac2.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/Prac2.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+    <list default="true" id="9c0a07e2-79ae-4272-867f-d2b399257698" name="Changes" comment="2 Этап">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deps_visualizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/deps_visualizer.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -139,11 +136,20 @@
       <option name="project" value="LOCAL" />
       <updated>1761927288457</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="2 Этап">
+      <option name="closed" value="true" />
+      <created>1761933732132</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1761933732135</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="1 Этап" />
-    <option name="LAST_COMMIT_MESSAGE" value="1 Этап" />
+    <MESSAGE value="2 Этап" />
+    <option name="LAST_COMMIT_MESSAGE" value="2 Этап" />
   </component>
 </project>
