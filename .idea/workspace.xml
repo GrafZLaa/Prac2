@@ -4,8 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9c0a07e2-79ae-4272-867f-d2b399257698" name="Changes" comment="3 Этап">
+    <list default="true" id="9c0a07e2-79ae-4272-867f-d2b399257698" name="Changes" comment="4 Этап">
+      <change beforePath="$PROJECT_DIR$/.SIGN.RSA.alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/DESCRIPTION" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/deps_visualizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/deps_visualizer.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -39,7 +41,9 @@
   &quot;associatedIndex&quot;: 5
 }</component>
   <component name="ProjectId" id="34q0zkf0YjJhvSTxAavdK2m2uxP" />
-  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true">
+    <ConfirmationsSetting value="1" id="Add" />
+  </component>
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
@@ -47,35 +51,43 @@
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
     &quot;Python.Prac2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.check_path.executor&quot;: &quot;Run&quot;,
+    &quot;Python.deps.executor&quot;: &quot;Run&quot;,
     &quot;Python.deps_visualizer.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;deletionFromPopupRequiresConfirmation&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/denis/Desktop/git/Prac2.1&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/denis/Desktop/git/Prac2.1/deps_visualizer.py&quot;,
     &quot;settings.editor.selected.configurable&quot;: &quot;org.jetbrains.plugins.github.ui.GithubSettingsConfigurable&quot;
   }
 }</component>
   <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\denis\Desktop\git\Prac2.1" />
+    </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\denis\Desktop\git\Prac2" />
     </key>
   </component>
   <component name="RunManager">
-    <configuration name="deps_visualizer" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="deps" type="PythonConfigurationType" factoryName="Python">
       <module name="Prac2" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <envs>
         <env name="PYTHONUNBUFFERED" value="1" />
+        <env name="PATH" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
+      <option name="SDK_NAME" value="Python 3.12 (1)" />
+      <option name="WORKING_DIRECTORY" value="C:\Users\denis\Desktop\git\Prac2.1" />
+      <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/deps_visualizer.py" />
-      <option name="PARAMETERS" value="--package curl --repo APKINDEX.tar.gz --mode offline --output graph.png --ascii-tree true --reverse-deps true" />
+      <option name="PARAMETERS" value="--package curl --repo APKINDEX.tar.gz --mode offline --output graph.png --ascii-tree true" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -83,11 +95,6 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <recent_temporary>
-      <list>
-        <item itemvalue="Python.deps_visualizer" />
-      </list>
-    </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
@@ -161,13 +168,22 @@
       <option name="project" value="LOCAL" />
       <updated>1763127234109</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="4 Этап">
+      <option name="closed" value="true" />
+      <created>1763136774836</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1763136774836</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="1 Этап" />
     <MESSAGE value="2 Этап" />
     <MESSAGE value="3 Этап" />
-    <option name="LAST_COMMIT_MESSAGE" value="3 Этап" />
+    <MESSAGE value="4 Этап" />
+    <option name="LAST_COMMIT_MESSAGE" value="4 Этап" />
   </component>
 </project>

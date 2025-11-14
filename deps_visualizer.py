@@ -6,9 +6,9 @@ import urllib.request
 import tarfile
 import gzip
 import io
-import json
+import subprocess
 from urllib.parse import urljoin, urlparse
-from collections import deque, defaultdict
+from collections import defaultdict
 
 
 def validate_package_name(name: str) -> str:
@@ -43,8 +43,8 @@ def validate_mode(mode: str) -> str:
 def validate_output_file(filename: str) -> str:
     if not filename:
         raise ValueError("Имя выходного файла не может быть пустым.")
-    if not filename.endswith(('.png', '.svg', '.pdf', '.jpg')):
-        raise ValueError("Имя файла изображения должно иметь расширение: .png, .svg, .pdf или .jpg.")
+    if not filename.endswith('.png'):
+        filename += '.png'
     return filename
 
 
@@ -55,15 +55,6 @@ def validate_ascii_tree(mode: str) -> bool:
         return False
     else:
         raise ValueError("Режим ASCII-дерева должен быть булевым: true/false, yes/no, 1/0 и т.п.")
-
-
-def validate_reverse_deps(mode: str) -> bool:
-    if mode.lower() in ('true', '1', 'yes', 'on'):
-        return True
-    elif mode.lower() in ('false', '0', 'no', 'off'):
-        return False
-    else:
-        raise ValueError("Режим обратных зависимостей должен быть булевым: true/false, yes/no, 1/0 и т.п.")
 
 
 def fetch_apkindex_content(repo_url: str) -> str:
@@ -166,75 +157,52 @@ def build_dependency_graph_dfs(start_package: str, get_deps_func) -> tuple:
     """
     graph = {}
     visited = set()
-    stack = [(start_package, 0)]
+    stack = [(start_package, False)]  # (узел, флаг обработки)
     in_stack = set()
     has_cycle = False
 
     while stack:
-        node, state = stack.pop()
+        node, processed = stack.pop()
 
-        if state == 0:
-            if node in visited:
-                continue
-
-            if node in in_stack:
-                has_cycle = True
-                continue
-
-            in_stack.add(node)
-            dependencies = get_deps_func(node)
-            graph[node] = dependencies
-
-            stack.append((node, 1))
-
-            for dep in reversed(dependencies):
-                stack.append((dep, 0))
-
-        else:
+        if processed:
             in_stack.remove(node)
-            visited.add(node)
+            continue
+
+        if node in visited:
+            continue
+
+        # Проверка на цикл
+        if node in in_stack:
+            has_cycle = True
+            continue
+
+        in_stack.add(node)
+        visited.add(node)
+
+        dependencies = get_deps_func(node)
+        graph[node] = dependencies.copy()
+
+        # Сначала добавляем текущий узел с флагом processed=True
+        stack.append((node, True))
+
+        # Затем добавляем все зависимости для обработки
+        for dep in reversed(dependencies):
+            stack.append((dep, False))
 
     return graph, has_cycle
 
 
-def build_reverse_dependency_graph(start_package: str, all_packages: dict) -> dict:
+def build_reverse_dependency_graph(target_package: str, repo_data: dict) -> list:
     """
-    Строит обратный граф зависимостей с помощью DFS без рекурсии.
-    Обратный граф показывает, какие пакеты зависят от данного пакета.
+    Строит список пакетов, которые зависят от target_package.
     """
-    # Создаем маппинг: для каждого пакета храним список пакетов, которые от него зависят
-    reverse_deps = defaultdict(list)
+    reverse_deps = []
 
-    # Проходим по всем пакетам в репозитории
-    for package, dependencies in all_packages.items():
-        for dep in dependencies:
-            # Если зависимость совпадает с искомым пакетом или является частью пути к нему
-            if dep == start_package:
-                reverse_deps[start_package].append(package)
-            # Также проверяем, не является ли зависимость префиксом искомого пакета
-            elif start_package.startswith(dep + ".") or start_package.startswith(dep + "/"):
-                reverse_deps[start_package].append(package)
+    for package, dependencies in repo_data.items():
+        if target_package in dependencies:
+            reverse_deps.append(package)
 
-    # Теперь строим полный граф обратных зависимостей с помощью DFS
-    result_graph = defaultdict(list)
-    visited = set()
-    stack = [start_package]
-
-    while stack:
-        current = stack.pop()
-        if current in visited:
-            continue
-
-        visited.add(current)
-        result_graph[current] = reverse_deps.get(current, [])
-
-        # Добавляем все пакеты, которые зависят от текущего, для дальнейшей обработки
-        for pkg in reverse_deps.get(current, []):
-            if pkg not in visited:
-                stack.append(pkg)
-
-    # Преобразуем defaultdict в обычный dict для вывода
-    return dict(result_graph)
+    return reverse_deps
 
 
 def print_graph(graph: dict, start_package: str) -> None:
@@ -261,41 +229,160 @@ def print_graph(graph: dict, start_package: str) -> None:
     print_dependencies(start_package)
 
 
-def print_reverse_dependencies_graph(graph: dict, target_package: str) -> None:
-    """Выводит граф обратных зависимостей в виде дерева."""
+def generate_mermaid_code(dependency_graph: dict, start_package: str) -> str:
+    """
+    Генерирует код на языке Mermaid для визуализации графа зависимостей.
+    """
+    lines = ["graph TD"]
 
-    def print_dependencies(pkg, indent="", visited=None):
-        if visited is None:
-            visited = set()
-        if pkg in visited:
-            print(f"{indent}└── {pkg} (цикл)")
-            return
-        visited.add(pkg)
+    # Собираем все уникальные узлы
+    nodes = set()
+    for pkg, deps in dependency_graph.items():
+        nodes.add(pkg)
+        for dep in deps:
+            nodes.add(dep)
 
-        deps = graph.get(pkg, [])
-        print(f"{indent}└── {pkg}")
+    # Добавляем узлы
+    for node in sorted(nodes):
+        if node == start_package:
+            lines.append(f"    {node}[{node}]")
+        else:
+            lines.append(f"    {node}[{node}]")
 
-        if deps:
-            for i, dep in enumerate(deps):
-                is_last = (i == len(deps) - 1)
-                new_indent = indent + ("    " if is_last else "│   ")
-                print_dependencies(dep, new_indent, visited.copy())
+    # Добавляем связи
+    edges = set()
+    for pkg, deps in dependency_graph.items():
+        for dep in deps:
+            edges.add((pkg, dep))
 
-    print(f"Обратные зависимости для пакета {target_package} (пакеты, которые зависят от {target_package}):")
-    print_dependencies(target_package)
+    for pkg, dep in sorted(edges):
+        lines.append(f"    {pkg} --> {dep}")
+
+    return "\n".join(lines)
+
+
+def generate_and_save_mermaid_image(mermaid_code: str, output_file: str) -> bool:
+    """
+    Сохраняет код Mermaid в .mmd файл и пытается сгенерировать изображение.
+    """
+    # Создаем .mmd файл
+    mmd_file = output_file.rsplit('.', 1)[0] + '.mmd'
+    with open(mmd_file, 'w', encoding='utf-8') as f:
+        f.write(mermaid_code)
+
+    print(f"Код Mermaid сохранен в файл: {mmd_file}")
+
+    # Пытаемся сгенерировать изображение, если установлен mmdc
+    try:
+        subprocess.run(['mmdc', '--version'], capture_output=True, check=True)
+        print("Генерация изображения с помощью mmdc...")
+
+        cmd = ['mmdc', '-i', mmd_file, '-o', output_file]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print(f"Изображение успешно сохранено в файл: {output_file}")
+            return True
+        else:
+            print(f"Ошибка при генерации изображения: {result.stderr}", file=sys.stderr)
+            print("Изображение не было сгенерировано. Используйте сохраненный .mmd файл для ручной генерации.")
+            return False
+
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Инструмент mmdc (mermaid-cli) не найден в PATH.", file=sys.stderr)
+        print("Для автоматической генерации изображений установите его командой:", file=sys.stderr)
+        print("  npm install -g @mermaid-js/mermaid-cli", file=sys.stderr)
+        print("После установки выполните команду для генерации изображения:", file=sys.stderr)
+        print(f"  mmdc -i {mmd_file} -o {output_file}")
+        return False
+
+
+def compare_with_standard_tools(package: str, mode: str, repo: str):
+    """
+    Сравнивает результаты с штатными инструментами визуализации.
+    """
+    print("\n=== Сравнение с штатными инструментами ===")
+
+    if mode in ('online', 'offline'):
+        print(f"Для Alpine Linux (apk) можно использовать следующие команды для анализа зависимостей:")
+        print(f"  apk info -R {package}              # Показать прямые зависимости")
+        print(f"  apk info --depends {package}       # Показать обратные зависимости")
+        print("\nНаш инструмент предоставляет дополнительные возможности:")
+        print("- Визуализацию полного графа транзитивных зависимостей")
+        print("- Обнаружение циклических зависимостей")
+        print("- Представление зависимостей в виде наглядного графа и ASCII-дерева")
+    else:
+        print("В тестовом режиме сравнение со штатными инструментами не выполняется.")
+
+
+def demonstrate_three_packages(repo_data, get_deps_func, mode, ascii_tree, output_prefix):
+    """
+    Демонстрирует визуализацию для трех различных пакетов.
+    """
+    print("\n=== Демонстрация визуализации зависимостей для трех различных пакетов ===")
+
+    # Выбираем три пакета для демонстрации
+    demo_packages = []
+    if mode == 'test':
+        # Для тестового режима берем первые три пакета
+        demo_packages = list(repo_data.keys())[:3]
+    else:
+        # Для реального репозитория Alpine выбираем распространенные пакеты
+        candidates = ['curl', 'busybox', 'openssl']
+        for pkg in candidates:
+            if pkg in repo_data and len(demo_packages) < 3:
+                demo_packages.append(pkg)
+
+    # Если не нашли достаточно пакетов, берем любые доступные
+    if len(demo_packages) < 3:
+        remaining = [p for p in repo_data.keys() if p not in demo_packages]
+        demo_packages.extend(remaining[:3 - len(demo_packages)])
+
+    for pkg in demo_packages:
+        print(f"\n--- Пакет: {pkg} ---")
+
+        if pkg not in repo_data:
+            print(f"  Пакет {pkg} не найден в репозитории.")
+            continue
+
+        # Получаем прямые зависимости
+        pkg_deps = repo_data[pkg]
+        if pkg_deps:
+            print(f"  Прямые зависимости:")
+            for dep in pkg_deps:
+                print(f"    - {dep}")
+        else:
+            print("  Нет прямых зависимостей")
+
+        # Строим граф зависимостей
+        pkg_graph, has_cycle = build_dependency_graph_dfs(pkg, get_deps_func)
+
+        # Генерируем код Mermaid
+        pkg_mermaid_code = generate_mermaid_code(pkg_graph, pkg)
+        print("\nКод Mermaid:")
+        print(pkg_mermaid_code)
+
+        # Сохраняем изображение
+        pkg_output = f"{output_prefix}_{pkg}.png"
+        generate_and_save_mermaid_image(pkg_mermaid_code, pkg_output)
+
+        # Выводим в ASCII-дереве, если требуется
+        if ascii_tree:
+            print("\nГраф зависимостей в виде ASCII-дерева:")
+            print_graph(pkg_graph, pkg)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Инструмент визуализации графа зависимостей пакетов (этапы 1-4).",
+        description="Инструмент визуализации графа зависимостей пакетов Alpine Linux.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument('--package', required=True, help='Имя анализируемого пакета.')
-    parser.add_argument('--repo', required=True, help='URL репозитория или путь к APKINDEX.tar.gz / тестовому файлу.')
-    parser.add_argument('--mode', required=True, choices=['online', 'offline', 'test'], help='Режим работы.')
-    parser.add_argument('--output', required=True, help='Имя файла изображения графа.')
-    parser.add_argument('--ascii-tree', required=True, help='Выводить ASCII-дерево? true/false.')
-    parser.add_argument('--reverse-deps', required=True, help='Выводить обратные зависимости? true/false.')
+    parser.add_argument('--repo', required=True, help='URL репозитория или путь к файлу тестового репозитория.')
+    parser.add_argument('--mode', required=True, choices=['online', 'offline', 'test'],
+                        help='Режим работы с тестовым репозиторием.')
+    parser.add_argument('--output', required=True, help='Имя сгенерированного файла с изображением графа.')
+    parser.add_argument('--ascii-tree', required=True, help='Режим вывода зависимостей в формате ASCII-дерева.')
 
     try:
         args = parser.parse_args()
@@ -306,7 +393,6 @@ def main():
         mode = validate_mode(args.mode)
         output = validate_output_file(args.output)
         ascii_tree = validate_ascii_tree(args.ascii_tree)
-        reverse_deps = validate_reverse_deps(args.reverse_deps)
 
         print("Параметры запуска:")
         print(f"package = {package}")
@@ -314,8 +400,7 @@ def main():
         print(f"mode = {mode}")
         print(f"output = {output}")
         print(f"ascii_tree = {ascii_tree}")
-        print(f"reverse_deps = {reverse_deps}")
-        print()  # пустая строка
+        print()
 
         # === Этап 2: получение данных репозитория в зависимости от режима ===
         repo_data = None
@@ -378,63 +463,67 @@ def main():
             if mode == 'test':
                 print("\n=== Демонстрация на тестовых данных ===")
                 print("Тестовый репозиторий позволяет легко проверить обработку циклических зависимостей.")
-                print("Пример файла тестового репозитория:")
-                print("A: B C")
-                print("B: D")
-                print("C: D E")
-                print("D: ")
-                print("E: B  # Циклическая зависимость: B -> D -> E -> B")
 
         except Exception as e:
             print(f"Ошибка при построении графа: {e}", file=sys.stderr)
             sys.exit(1)
 
         # === Этап 4: вывод обратных зависимостей ===
-        if reverse_deps:
-            print("\n=== Этап 4: Построение графа обратных зависимостей ===")
+        print("\n=== Этап 4: Вывод обратных зависимостей ===")
 
-            if package not in repo_data:
-                print(
-                    f"Ошибка: пакет '{package}' отсутствует в репозитории. Невозможно построить граф обратных зависимостей.",
-                    file=sys.stderr)
-                sys.exit(1)
+        if package not in repo_data:
+            print(f"Ошибка: пакет '{package}' отсутствует в репозитории. Невозможно найти обратные зависимости.",
+                  file=sys.stderr)
+            sys.exit(1)
 
-            try:
-                reverse_graph = build_reverse_dependency_graph(package, repo_data)
-                print(f"Граф обратных зависимостей для пакета '{package}' успешно построен.")
+        try:
+            reverse_deps = build_reverse_dependency_graph(package, repo_data)
+            if reverse_deps:
+                print(f"\nОбратные зависимости для пакета '{package}' (пакеты, которые зависят от него):")
+                for rdep in reverse_deps:
+                    print(f"  - {rdep}")
+            else:
+                print(f"\nНет обратных зависимостей для пакета '{package}'.")
 
-                if package in reverse_graph and reverse_graph[package]:
-                    print(f"\nПакеты, зависящие от '{package}':")
-                    for pkg in reverse_graph[package]:
-                        print(f"  - {pkg}")
+            if mode == 'test':
+                print("\n=== Демонстрация обратных зависимостей на тестовых данных ===")
+                print("Для тестового репозитория с содержимым:")
+                print("A: B C")
+                print("B: D")
+                print("C: D E")
+                print("D: ")
+                print("E: B")
+                print("Обратные зависимости для пакета D:")
+                print("  - B (зависимость: B -> D)")
+                print("  - C (зависимость: C -> D E)")
 
-                    print("\nПолный граф обратных зависимостей:")
-                    for pkg, deps in reverse_graph.items():
-                        if deps:
-                            print(f"{pkg} <- {', '.join(deps)}")
-                        else:
-                            print(f"{pkg} <- (нет обратных зависимостей)")
+        except Exception as e:
+            print(f"Ошибка при поиске обратных зависимостей: {e}", file=sys.stderr)
+            sys.exit(1)
 
-                    if ascii_tree:
-                        print("\nГраф обратных зависимостей в виде ASCII-дерева:")
-                        print_reverse_dependencies_graph(reverse_graph, package)
-                else:
-                    print(f"\nНе найдено пакетов, зависящих от '{package}'.")
+        # === Этап 5: Визуализация графа зависимостей ===
+        print("\n=== Этап 5: Визуализация графа зависимостей ===")
 
-                if mode == 'test':
-                    print("\n=== Демонстрация обратных зависимостей на тестовых данных ===")
-                    print("Для тестового репозитория с содержимым:")
-                    print("A: B C")
-                    print("B: D")
-                    print("C: D E")
-                    print("E: B")
-                    print("Обратные зависимости для пакета D:")
-                    print("  - B (зависимость B: D)")
-                    print("  - C (зависимость C: D E)")
+        try:
+            # Генерируем код Mermaid
+            mermaid_code = generate_mermaid_code(graph, package)
+            print("\nКод Mermaid для визуализации графа:")
+            print(mermaid_code)
 
-            except Exception as e:
-                print(f"Ошибка при построении графа обратных зависимостей: {e}", file=sys.stderr)
-                sys.exit(1)
+            # Генерируем и сохраняем изображение
+            generate_and_save_mermaid_image(mermaid_code, output)
+
+            # Сравнение с штатными инструментами
+            compare_with_standard_tools(package, mode, repo)
+
+            # Демонстрация для трех пакетов
+            demonstrate_three_packages(repo_data, get_deps, mode, ascii_tree, output.rsplit('.', 1)[0])
+
+            print("\nЭтап 5 успешно завершен. Визуализация графа сохранена в файл(ы).")
+
+        except Exception as e:
+            print(f"Ошибка при визуализации графа: {e}", file=sys.stderr)
+            sys.exit(1)
 
     except (ValueError, OSError, RuntimeError) as e:
         print(f"Ошибка: {e}", file=sys.stderr)
