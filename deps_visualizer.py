@@ -8,7 +8,7 @@ import gzip
 import io
 import json
 from urllib.parse import urljoin, urlparse
-from collections import deque
+from collections import deque, defaultdict
 
 
 def validate_package_name(name: str) -> str:
@@ -16,8 +16,6 @@ def validate_package_name(name: str) -> str:
         raise ValueError("Имя пакета не может быть пустым.")
     name = name.strip()
     if not name.replace('-', '_').replace('.', '_').replace('+', '_').isidentifier():
-        # Alpine допускает '+' в именах (например, libstdc++)
-        # Простая проверка: не должно быть пробелов или слешей
         if ' ' in name or '/' in name or '\\' in name:
             raise ValueError("Имя пакета не должно содержать пробелов или путей.")
     return name
@@ -59,6 +57,15 @@ def validate_ascii_tree(mode: str) -> bool:
         raise ValueError("Режим ASCII-дерева должен быть булевым: true/false, yes/no, 1/0 и т.п.")
 
 
+def validate_reverse_deps(mode: str) -> bool:
+    if mode.lower() in ('true', '1', 'yes', 'on'):
+        return True
+    elif mode.lower() in ('false', '0', 'no', 'off'):
+        return False
+    else:
+        raise ValueError("Режим обратных зависимостей должен быть булевым: true/false, yes/no, 1/0 и т.п.")
+
+
 def fetch_apkindex_content(repo_url: str) -> str:
     """Загружает и распаковывает APKINDEX.tar.gz, возвращает содержимое APKINDEX."""
     try:
@@ -73,18 +80,13 @@ def fetch_apkindex_content(repo_url: str) -> str:
             with open(repo_url, 'rb') as f:
                 compressed_data = f.read()
         else:
-            # Предполагаем, что это базовый URL репозитория → добавляем APKINDEX.tar.gz
             repo_url = repo_url.rstrip('/') + '/APKINDEX.tar.gz'
             with urllib.request.urlopen(repo_url) as response:
                 compressed_data = response.read()
 
-        # Распаковка gzip
         decompressed = gzip.decompress(compressed_data)
-
-        # Чтение tar-архива в памяти
         tar_stream = io.BytesIO(decompressed)
         with tarfile.open(fileobj=tar_stream, mode='r') as tar:
-            # Ищем файл APKINDEX (без расширения)
             for member in tar.getmembers():
                 if member.name == 'APKINDEX':
                     f = tar.extractfile(member)
@@ -111,21 +113,17 @@ def parse_apkindex_to_dict(apkindex_content: str) -> dict:
         elif line.startswith('D:'):
             deps_str = line[2:].strip()
             if deps_str:
-                # Убираем версионные зависимости вроде "so:libfoo.so.1" или "pkg>=1.0"
-                # Для простоты оставляем только имена пакетов
                 raw_deps = deps_str.split()
                 clean_deps = []
                 for d in raw_deps:
-                    # Пропускаем shared object зависимости
                     if d.startswith('so:'):
                         continue
-                    # Убираем версионную часть после >=, <=, = и т.д.
                     pkg_name = d.split('>=')[0].split('<=')[0].split('=')[0].split('!')[0].strip()
                     clean_deps.append(pkg_name)
                 current_deps = clean_deps
             else:
                 current_deps = []
-        elif line == '':  # конец записи пакета
+        elif line == '':
             if current_pkg is not None:
                 packages[current_pkg] = current_deps
                 current_pkg = None
@@ -167,9 +165,9 @@ def build_dependency_graph_dfs(start_package: str, get_deps_func) -> tuple:
     Возвращает (граф, есть_цикла)
     """
     graph = {}
-    visited = set()  # полностью обработанные узлы
-    stack = [(start_package, 0)]  # (узел, состояние: 0 - начать обработку, 1 - завершить)
-    in_stack = set()  # узлы в текущем пути обработки (для обнаружения циклов)
+    visited = set()
+    stack = [(start_package, 0)]
+    in_stack = set()
     has_cycle = False
 
     while stack:
@@ -180,7 +178,6 @@ def build_dependency_graph_dfs(start_package: str, get_deps_func) -> tuple:
                 continue
 
             if node in in_stack:
-                # print(f"Обнаружена циклическая зависимость: {node} уже в текущем пути")
                 has_cycle = True
                 continue
 
@@ -188,18 +185,56 @@ def build_dependency_graph_dfs(start_package: str, get_deps_func) -> tuple:
             dependencies = get_deps_func(node)
             graph[node] = dependencies
 
-            # Сначала вернемся к этому узлу для завершения обработки
             stack.append((node, 1))
 
-            # Затем обработаем зависимости в обратном порядке (чтобы порядок был как в рекурсивном DFS)
             for dep in reversed(dependencies):
                 stack.append((dep, 0))
 
-        else:  # state == 1, завершение обработки
+        else:
             in_stack.remove(node)
             visited.add(node)
 
     return graph, has_cycle
+
+
+def build_reverse_dependency_graph(start_package: str, all_packages: dict) -> dict:
+    """
+    Строит обратный граф зависимостей с помощью DFS без рекурсии.
+    Обратный граф показывает, какие пакеты зависят от данного пакета.
+    """
+    # Создаем маппинг: для каждого пакета храним список пакетов, которые от него зависят
+    reverse_deps = defaultdict(list)
+
+    # Проходим по всем пакетам в репозитории
+    for package, dependencies in all_packages.items():
+        for dep in dependencies:
+            # Если зависимость совпадает с искомым пакетом или является частью пути к нему
+            if dep == start_package:
+                reverse_deps[start_package].append(package)
+            # Также проверяем, не является ли зависимость префиксом искомого пакета
+            elif start_package.startswith(dep + ".") or start_package.startswith(dep + "/"):
+                reverse_deps[start_package].append(package)
+
+    # Теперь строим полный граф обратных зависимостей с помощью DFS
+    result_graph = defaultdict(list)
+    visited = set()
+    stack = [start_package]
+
+    while stack:
+        current = stack.pop()
+        if current in visited:
+            continue
+
+        visited.add(current)
+        result_graph[current] = reverse_deps.get(current, [])
+
+        # Добавляем все пакеты, которые зависят от текущего, для дальнейшей обработки
+        for pkg in reverse_deps.get(current, []):
+            if pkg not in visited:
+                stack.append(pkg)
+
+    # Преобразуем defaultdict в обычный dict для вывода
+    return dict(result_graph)
 
 
 def print_graph(graph: dict, start_package: str) -> None:
@@ -226,9 +261,33 @@ def print_graph(graph: dict, start_package: str) -> None:
     print_dependencies(start_package)
 
 
+def print_reverse_dependencies_graph(graph: dict, target_package: str) -> None:
+    """Выводит граф обратных зависимостей в виде дерева."""
+
+    def print_dependencies(pkg, indent="", visited=None):
+        if visited is None:
+            visited = set()
+        if pkg in visited:
+            print(f"{indent}└── {pkg} (цикл)")
+            return
+        visited.add(pkg)
+
+        deps = graph.get(pkg, [])
+        print(f"{indent}└── {pkg}")
+
+        if deps:
+            for i, dep in enumerate(deps):
+                is_last = (i == len(deps) - 1)
+                new_indent = indent + ("    " if is_last else "│   ")
+                print_dependencies(dep, new_indent, visited.copy())
+
+    print(f"Обратные зависимости для пакета {target_package} (пакеты, которые зависят от {target_package}):")
+    print_dependencies(target_package)
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Инструмент визуализации графа зависимостей пакетов (этапы 1-3).",
+        description="Инструмент визуализации графа зависимостей пакетов (этапы 1-4).",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument('--package', required=True, help='Имя анализируемого пакета.')
@@ -236,6 +295,7 @@ def main():
     parser.add_argument('--mode', required=True, choices=['online', 'offline', 'test'], help='Режим работы.')
     parser.add_argument('--output', required=True, help='Имя файла изображения графа.')
     parser.add_argument('--ascii-tree', required=True, help='Выводить ASCII-дерево? true/false.')
+    parser.add_argument('--reverse-deps', required=True, help='Выводить обратные зависимости? true/false.')
 
     try:
         args = parser.parse_args()
@@ -246,6 +306,7 @@ def main():
         mode = validate_mode(args.mode)
         output = validate_output_file(args.output)
         ascii_tree = validate_ascii_tree(args.ascii_tree)
+        reverse_deps = validate_reverse_deps(args.reverse_deps)
 
         print("Параметры запуска:")
         print(f"package = {package}")
@@ -253,6 +314,7 @@ def main():
         print(f"mode = {mode}")
         print(f"output = {output}")
         print(f"ascii_tree = {ascii_tree}")
+        print(f"reverse_deps = {reverse_deps}")
         print()  # пустая строка
 
         # === Этап 2: получение данных репозитория в зависимости от режима ===
@@ -285,11 +347,9 @@ def main():
         # === Этап 3: построение графа зависимостей ===
         print("\n=== Этап 3: Построение графа зависимостей ===")
 
-        # Функция для получения зависимостей
         def get_deps(pkg_name):
             return repo_data.get(pkg_name, [])
 
-        # Проверяем, существует ли стартовый пакет в репозитории
         if package not in repo_data:
             print(f"Ошибка: стартовый пакет '{package}' отсутствует в репозитории. Невозможно построить граф.",
                   file=sys.stderr)
@@ -304,7 +364,6 @@ def main():
             else:
                 print("Циклические зависимости не обнаружены.")
 
-            # Вывод графа в формате зависимостей
             print("\nГраф зависимостей (все зависимости):")
             for pkg, deps in graph.items():
                 if deps:
@@ -312,12 +371,10 @@ def main():
                 else:
                     print(f"{pkg} -> (нет зависимостей)")
 
-            # Вывод графа в виде ASCII-дерева, если запрошено
             if ascii_tree:
                 print("\nГраф зависимостей в виде ASCII-дерева:")
                 print_graph(graph, package)
 
-            # Демонстрация на тестовых данных
             if mode == 'test':
                 print("\n=== Демонстрация на тестовых данных ===")
                 print("Тестовый репозиторий позволяет легко проверить обработку циклических зависимостей.")
@@ -327,13 +384,57 @@ def main():
                 print("C: D E")
                 print("D: ")
                 print("E: B  # Циклическая зависимость: B -> D -> E -> B")
-                print("\nДля проверки работы с циклическими зависимостями запустите:")
-                print(
-                    f"./script.py --package A --repo ваш_тестовый_файл.txt --mode test --output graph.svg --ascii-tree true")
 
         except Exception as e:
             print(f"Ошибка при построении графа: {e}", file=sys.stderr)
             sys.exit(1)
+
+        # === Этап 4: вывод обратных зависимостей ===
+        if reverse_deps:
+            print("\n=== Этап 4: Построение графа обратных зависимостей ===")
+
+            if package not in repo_data:
+                print(
+                    f"Ошибка: пакет '{package}' отсутствует в репозитории. Невозможно построить граф обратных зависимостей.",
+                    file=sys.stderr)
+                sys.exit(1)
+
+            try:
+                reverse_graph = build_reverse_dependency_graph(package, repo_data)
+                print(f"Граф обратных зависимостей для пакета '{package}' успешно построен.")
+
+                if package in reverse_graph and reverse_graph[package]:
+                    print(f"\nПакеты, зависящие от '{package}':")
+                    for pkg in reverse_graph[package]:
+                        print(f"  - {pkg}")
+
+                    print("\nПолный граф обратных зависимостей:")
+                    for pkg, deps in reverse_graph.items():
+                        if deps:
+                            print(f"{pkg} <- {', '.join(deps)}")
+                        else:
+                            print(f"{pkg} <- (нет обратных зависимостей)")
+
+                    if ascii_tree:
+                        print("\nГраф обратных зависимостей в виде ASCII-дерева:")
+                        print_reverse_dependencies_graph(reverse_graph, package)
+                else:
+                    print(f"\nНе найдено пакетов, зависящих от '{package}'.")
+
+                if mode == 'test':
+                    print("\n=== Демонстрация обратных зависимостей на тестовых данных ===")
+                    print("Для тестового репозитория с содержимым:")
+                    print("A: B C")
+                    print("B: D")
+                    print("C: D E")
+                    print("E: B")
+                    print("Обратные зависимости для пакета D:")
+                    print("  - B (зависимость B: D)")
+                    print("  - C (зависимость C: D E)")
+
+            except Exception as e:
+                print(f"Ошибка при построении графа обратных зависимостей: {e}", file=sys.stderr)
+                sys.exit(1)
 
     except (ValueError, OSError, RuntimeError) as e:
         print(f"Ошибка: {e}", file=sys.stderr)
