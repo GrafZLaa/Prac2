@@ -6,7 +6,6 @@ import urllib.request
 import tarfile
 import gzip
 import io
-import subprocess
 from urllib.parse import urljoin, urlparse
 from collections import defaultdict
 
@@ -43,8 +42,8 @@ def validate_mode(mode: str) -> str:
 def validate_output_file(filename: str) -> str:
     if not filename:
         raise ValueError("Имя выходного файла не может быть пустым.")
-    if not filename.endswith('.png'):
-        filename += '.png'
+    if not filename.endswith('.mmd'):
+        filename += '.mmd'
     return filename
 
 
@@ -55,6 +54,26 @@ def validate_ascii_tree(mode: str) -> bool:
         return False
     else:
         raise ValueError("Режим ASCII-дерева должен быть булевым: true/false, yes/no, 1/0 и т.п.")
+
+
+def safe_mermaid_id(name: str) -> str:
+    """
+    Преобразует имя пакета в безопасный идентификатор для Mermaid.
+    Заменяет недопустимые символы на подчеркивания.
+    """
+    cleaned = name
+    # Заменяем проблемные символы
+    for char in '/\\-+.:':
+        cleaned = cleaned.replace(char, '_')
+    # Убираем начальные и конечные подчеркивания
+    cleaned = cleaned.strip('_')
+    # Если начинается с цифры, добавляем префикс
+    if cleaned and cleaned[0].isdigit():
+        cleaned = 'pkg_' + cleaned
+    # Если пустое имя
+    if not cleaned:
+        cleaned = 'unknown_package'
+    return cleaned
 
 
 def fetch_apkindex_content(repo_url: str) -> str:
@@ -231,23 +250,28 @@ def print_graph(graph: dict, start_package: str) -> None:
 
 def generate_mermaid_code(dependency_graph: dict, start_package: str) -> str:
     """
-    Генерирует код на языке Mermaid для визуализации графа зависимостей.
+    Генерирует код на языке Mermaid для визуализации графа зависимостей
+    с использованием безопасных идентификаторов.
     """
     lines = ["graph TD"]
+    node_ids = {}  # Словарь для соответствия оригинальных имен и идентификаторов
 
-    # Собираем все уникальные узлы
+    # Собираем все уникальные узлы и создаем безопасные идентификаторы
     nodes = set()
     for pkg, deps in dependency_graph.items():
         nodes.add(pkg)
         for dep in deps:
             nodes.add(dep)
 
-    # Добавляем узлы
+    # Создаем идентификаторы для всех узлов
     for node in sorted(nodes):
+        safe_id = safe_mermaid_id(node)
+        node_ids[node] = safe_id
+        # Для стартового пакета используем жирный шрифт
         if node == start_package:
-            lines.append(f"    {node}[{node}]")
+            lines.append(f'    {safe_id}["<b>{node}</b>"]')
         else:
-            lines.append(f"    {node}[{node}]")
+            lines.append(f'    {safe_id}["{node}"]')
 
     # Добавляем связи
     edges = set()
@@ -256,45 +280,31 @@ def generate_mermaid_code(dependency_graph: dict, start_package: str) -> str:
             edges.add((pkg, dep))
 
     for pkg, dep in sorted(edges):
-        lines.append(f"    {pkg} --> {dep}")
+        pkg_id = node_ids[pkg]
+        dep_id = node_ids[dep]
+        lines.append(f"    {pkg_id} --> {dep_id}")
+
+    # Добавляем стиль для лучшей читаемости
+    lines.append("")
+    lines.append("    classDef default fill:#f9f9f9,stroke:#333,color:#333;")
+    lines.append("    classDef start fill:#4CAF50,stroke:#388E3C,color:white;")
+
+    if start_package in node_ids:
+        start_id = node_ids[start_package]
+        lines.append(f"    class {start_id} start;")
 
     return "\n".join(lines)
 
 
-def generate_and_save_mermaid_image(mermaid_code: str, output_file: str) -> bool:
+def save_mermaid_code(mermaid_code: str, output_file: str) -> None:
     """
-    Сохраняет код Mermaid в .mmd файл и пытается сгенерировать изображение.
+    Сохраняет код Mermaid в .mmd файл для просмотра в PyCharm.
     """
-    # Создаем .mmd файл
-    mmd_file = output_file.rsplit('.', 1)[0] + '.mmd'
-    with open(mmd_file, 'w', encoding='utf-8') as f:
+    with open(output_file, 'w', encoding='utf-8') as f:
         f.write(mermaid_code)
-
-    print(f"Код Mermaid сохранен в файл: {mmd_file}")
-
-    # Пытаемся сгенерировать изображение, если установлен mmdc
-    try:
-        subprocess.run(['mmdc', '--version'], capture_output=True, check=True)
-        print("Генерация изображения с помощью mmdc...")
-
-        cmd = ['mmdc', '-i', mmd_file, '-o', output_file]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-
-        if result.returncode == 0:
-            print(f"Изображение успешно сохранено в файл: {output_file}")
-            return True
-        else:
-            print(f"Ошибка при генерации изображения: {result.stderr}", file=sys.stderr)
-            print("Изображение не было сгенерировано. Используйте сохраненный .mmd файл для ручной генерации.")
-            return False
-
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Инструмент mmdc (mermaid-cli) не найден в PATH.", file=sys.stderr)
-        print("Для автоматической генерации изображений установите его командой:", file=sys.stderr)
-        print("  npm install -g @mermaid-js/mermaid-cli", file=sys.stderr)
-        print("После установки выполните команду для генерации изображения:", file=sys.stderr)
-        print(f"  mmdc -i {mmd_file} -o {output_file}")
-        return False
+    print(f"Код Mermaid сохранен в файл: {output_file}")
+    print(
+        f"Для просмотра диаграммы в PyCharm: откройте файл {output_file} и нажмите на иконку 'Preview' в правом верхнем углу.")
 
 
 def compare_with_standard_tools(package: str, mode: str, repo: str):
@@ -363,8 +373,8 @@ def demonstrate_three_packages(repo_data, get_deps_func, mode, ascii_tree, outpu
         print(pkg_mermaid_code)
 
         # Сохраняем изображение
-        pkg_output = f"{output_prefix}_{pkg}.png"
-        generate_and_save_mermaid_image(pkg_mermaid_code, pkg_output)
+        pkg_output = f"{output_prefix}_{pkg}.mmd"
+        save_mermaid_code(pkg_mermaid_code, pkg_output)
 
         # Выводим в ASCII-дереве, если требуется
         if ascii_tree:
@@ -381,7 +391,8 @@ def main():
     parser.add_argument('--repo', required=True, help='URL репозитория или путь к файлу тестового репозитория.')
     parser.add_argument('--mode', required=True, choices=['online', 'offline', 'test'],
                         help='Режим работы с тестовым репозиторием.')
-    parser.add_argument('--output', required=True, help='Имя сгенерированного файла с изображением графа.')
+    parser.add_argument('--output', required=True,
+                        help='Имя сгенерированного файла с кодом Mermaid (с расширением .mmd).')
     parser.add_argument('--ascii-tree', required=True, help='Режим вывода зависимостей в формате ASCII-дерева.')
 
     try:
@@ -510,8 +521,8 @@ def main():
             print("\nКод Mermaid для визуализации графа:")
             print(mermaid_code)
 
-            # Генерируем и сохраняем изображение
-            generate_and_save_mermaid_image(mermaid_code, output)
+            # Сохраняем код Mermaid
+            save_mermaid_code(mermaid_code, output)
 
             # Сравнение с штатными инструментами
             compare_with_standard_tools(package, mode, repo)
@@ -519,7 +530,7 @@ def main():
             # Демонстрация для трех пакетов
             demonstrate_three_packages(repo_data, get_deps, mode, ascii_tree, output.rsplit('.', 1)[0])
 
-            print("\nЭтап 5 успешно завершен. Визуализация графа сохранена в файл(ы).")
+            print("\nЭтап 5 успешно завершен. Код Mermaid сохранен в файл(ы).")
 
         except Exception as e:
             print(f"Ошибка при визуализации графа: {e}", file=sys.stderr)
